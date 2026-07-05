@@ -4,6 +4,9 @@ import logging
 import json
 import requests
 from datetime import datetime
+from dotenv import load_dotenv
+
+load_dotenv(override=True)
 
 # Configure logging
 log_directory = os.getenv("LOG_DIR", "logs")
@@ -44,11 +47,18 @@ def save_cache(cache):
 
 
 def get_llm_provider():
-    provider = os.getenv("LLM_PROVIDER")
-    if not provider and (os.getenv("GEMINI_PROJECT_ID") or os.getenv("GEMINI_API_KEY")):
-        provider = "GEMINI"
-    # if necessary, add ANTHROPIC/OPENAI
-    return provider
+    profile = os.getenv("LLM_PROVIDER")
+    if profile:
+        return profile
+    if (
+        os.getenv("OPENROUTER_API_KEY")
+        and os.getenv("OPENROUTER_BASE_URL")
+        and os.getenv("OPENROUTER_MODEL")
+    ):
+        return "OPENROUTER"
+    if os.getenv("GEMINI_API_KEY") or os.getenv("GEMINI_PROJECT_ID"):
+        return "GEMINI"
+    return None
 
 
 def _call_llm_provider(prompt: str) -> str:
@@ -139,6 +149,10 @@ def call_llm(prompt: str, use_cache: bool = True) -> str:
             return cache[prompt]
 
     provider = get_llm_provider()
+    if not provider:
+        raise ValueError(
+            "No LLM configured. Set LLM_PROVIDER or OpenRouter/Gemini variables in .env"
+        )
     if provider == "GEMINI":
         response_text = _call_llm_gemini(prompt)
     else:  # generic method using a URL that is OpenAI compatible API (Ollama, ...)
@@ -159,17 +173,17 @@ def call_llm(prompt: str, use_cache: bool = True) -> str:
 
 
 def _call_llm_gemini(prompt: str) -> str:
-    if os.getenv("GEMINI_PROJECT_ID"):
+    if os.getenv("GEMINI_API_KEY"):
+        client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+    elif os.getenv("GEMINI_PROJECT_ID"):
         client = genai.Client(
             vertexai=True,
             project=os.getenv("GEMINI_PROJECT_ID"),
             location=os.getenv("GEMINI_LOCATION", "us-central1")
         )
-    elif os.getenv("GEMINI_API_KEY"):
-        client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
     else:
         raise ValueError("Either GEMINI_PROJECT_ID or GEMINI_API_KEY must be set in the environment")
-    model = os.getenv("GEMINI_MODEL", "gemini-2.5-pro-exp-03-25")
+    model = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
     response = client.models.generate_content(
         model=model,
         contents=[prompt]
